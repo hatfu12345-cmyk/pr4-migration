@@ -1,4 +1,4 @@
-﻿name: Idempotent Mattermost Migration & Upgrade
+name: Idempotent Mattermost Migration & Upgrade
 on:
   push:
     branches: [ "migration" ]
@@ -23,8 +23,7 @@ jobs:
       - name: Backup Legacy MySQL
         if: steps.check_status.outputs.already_migrated == 'false'
         shell: powershell
-        run: |
-          docker exec mattermost-mysql mysqldump -u root -pMM_ROOT_PASSWORD mattermost > backup.sql
+        run: docker exec mattermost-mysql mysqldump -u root -pMM_ROOT_PASSWORD mattermost > backup.sql
       - name: Start Target PostgreSQL
         if: steps.check_status.outputs.already_migrated == 'false'
         shell: powershell
@@ -34,8 +33,7 @@ jobs:
       - name: Run pgloader
         if: steps.check_status.outputs.already_migrated == 'false'
         shell: powershell
-        run: |
-          docker run --rm --network=mattermost_network mattermost/mattermost-pgloader:latest pgloader --with "include drop" --with "create tables" mysql://root:MM_ROOT_PASSWORD@mattermost-mysql:3306/mattermost postgresql://mmuser:MM_PG_PASSWORD@mattermost-postgres:5432/mattermost
+        run: docker run --rm --network=mattermost_network mattermost/mattermost-pgloader:latest pgloader --with "include drop" --with "create tables" mysql://root:MM_ROOT_PASSWORD@mattermost-mysql:3306/mattermost postgresql://mmuser:MM_PG_PASSWORD@mattermost-postgres:5432/mattermost
       - name: Mark Migration as Completed
         if: steps.check_status.outputs.already_migrated == 'false'
         shell: powershell
