@@ -18,7 +18,7 @@ jobs:
 
       - name: Check Migration Status
         id: check_status
-        shell: pwsh
+        shell: powershell
         run: |
           if (Test-Path "C:\mattermost_migration_completed") {
             Write-Host "✓ Already migrated. Skipping backup and data transfer."
@@ -30,7 +30,7 @@ jobs:
 
       - name: Backup Legacy MySQL
         if: steps.check_status.outputs.already_migrated == 'false'
-        shell: pwsh
+        shell: powershell
         run: |
           $BACKUP_NAME = "mattermost_mysql_backup_${{ github.run_id }}.sql"
           docker exec -e MYSQL_PWD="${{ secrets.DB_MYSQL_ROOT_PASSWORD }}" mattermost-mysql mysqldump -u root mattermost > $BACKUP_NAME
@@ -46,7 +46,7 @@ jobs:
 
       - name: Start Target PostgreSQL
         if: steps.check_status.outputs.already_migrated == 'false'
-        shell: pwsh
+        shell: powershell
         run: |
           docker compose -f $env:COMPOSE_FILE up -d mattermost-postgres
           Write-Host "Waiting for PostgreSQL..."
@@ -61,7 +61,7 @@ jobs:
 
       - name: Run pgloader (include drop for idempotency)
         if: steps.check_status.outputs.already_migrated == 'false'
-        shell: pwsh
+        shell: powershell
         run: |
           docker run --rm --network=mattermost_network `
             mattermost/mattermost-pgloader:latest `
@@ -73,13 +73,13 @@ jobs:
 
       - name: Mark Migration as Completed
         if: steps.check_status.outputs.already_migrated == 'false'
-        shell: pwsh
+        shell: powershell
         run: New-Item -Path "C:\mattermost_migration_completed" -ItemType File -Force
 
       - name: Deploy Upgraded Stack
         env:
           PG_PASSWORD: ${{ secrets.DB_POSTGRES_PASSWORD }}
-        shell: pwsh
+        shell: powershell
         run: |
           docker rm -f mattermost-mysql -ErrorAction SilentlyContinue
           docker compose -f $env:COMPOSE_FILE up -d --remove-orphans
@@ -97,7 +97,7 @@ jobs:
           }
 
       - name: Run Health Checks
-        shell: pwsh
+        shell: powershell
         run: |
           try {
             $response = Invoke-WebRequest -Uri "http://localhost:8065/api/v4/system/ping" -UseBasicParsing
