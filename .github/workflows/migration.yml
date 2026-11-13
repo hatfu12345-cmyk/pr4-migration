@@ -21,10 +21,10 @@ jobs:
         shell: powershell
         run: |
           if (Test-Path "C:\mattermost_migration_completed") {
-            Write-Host "✓ Already migrated. Skipping backup and data transfer."
+            Write-Host "Already migrated. Skipping backup and data transfer."
             "already_migrated=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
-            Write-Host "⚠ Migration required."
+            Write-Host "Migration required."
             "already_migrated=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
 
@@ -34,7 +34,7 @@ jobs:
         run: |
           $BACKUP_NAME = "mattermost_mysql_backup_${{ github.run_id }}.sql"
           docker exec -e MYSQL_PWD="${{ secrets.DB_MYSQL_ROOT_PASSWORD }}" mattermost-mysql mysqldump -u root mattermost > $BACKUP_NAME
-          Write-Host "✓ Backup saved as $BACKUP_NAME"
+          Write-Host "Backup saved as $BACKUP_NAME"
 
       - name: Upload MySQL backup
         if: steps.check_status.outputs.already_migrated == 'false'
@@ -53,7 +53,7 @@ jobs:
           for ($i = 1; $i -le 30; $i++) {
             $status = docker exec mattermost-postgres pg_isready -U mmuser 2>&1
             if ($status -match "accepting connections") {
-              Write-Host "✓ PostgreSQL ready"
+              Write-Host "PostgreSQL ready"
               break
             }
             Start-Sleep -Seconds 2
@@ -88,7 +88,7 @@ jobs:
             try {
               $response = Invoke-WebRequest -Uri "http://localhost:8065/api/v4/system/ping" -UseBasicParsing -TimeoutSec 5
               if ($response.StatusCode -eq 200) {
-                Write-Host "✓ Mattermost is up"
+                Write-Host "Mattermost is up"
                 break
               }
             } catch {
@@ -102,10 +102,10 @@ jobs:
           try {
             $response = Invoke-WebRequest -Uri "http://localhost:8065/api/v4/system/ping" -UseBasicParsing
             if ($response.StatusCode -eq 200) {
-              Write-Host "✓ Mattermost upgraded and running on Postgres!"
+              Write-Host "Mattermost upgraded and running on Postgres!"
             }
           } catch {
-            Write-Host "❌ Health check failed. Logs:"
+            Write-Host "Health check failed. Logs:"
             docker compose -f $env:COMPOSE_FILE logs
             exit 1
           }
