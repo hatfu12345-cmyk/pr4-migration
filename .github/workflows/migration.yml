@@ -1,0 +1,111 @@
+name: Idempotent Mattermost Migration & Upgrade
+
+on:
+  push:
+    branches: [ "migration" ]
+  workflow_dispatch:
+
+env:
+  COMPOSE_FILE: docker-compose.prod.yml
+
+jobs:
+  migrate-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Migration Status
+        id: check_status
+        shell: pwsh
+        run: |
+          if (Test-Path "C:\mattermost_migration_completed") {
+            Write-Host "✓ Already migrated. Skipping backup and data transfer."
+            "already_migrated=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Host "⚠ Migration required."
+            "already_migrated=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Backup Legacy MySQL
+        if: steps.check_status.outputs.already_migrated == 'false'
+        shell: pwsh
+        run: |
+          $BACKUP_NAME = "mattermost_mysql_backup_${{ github.run_id }}.sql"
+          docker exec -e MYSQL_PWD="${{ secrets.DB_MYSQL_ROOT_PASSWORD }}" mattermost-mysql mysqldump -u root mattermost > $BACKUP_NAME
+          Write-Host "✓ Backup saved as $BACKUP_NAME"
+
+      - name: Upload MySQL backup
+        if: steps.check_status.outputs.already_migrated == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-backup
+          path: mattermost_mysql_backup_*.sql
+          retention-days: 7
+
+      - name: Start Target PostgreSQL
+        if: steps.check_status.outputs.already_migrated == 'false'
+        shell: pwsh
+        run: |
+          docker compose -f $env:COMPOSE_FILE up -d mattermost-postgres
+          Write-Host "Waiting for PostgreSQL..."
+          for ($i = 1; $i -le 30; $i++) {
+            $status = docker exec mattermost-postgres pg_isready -U mmuser 2>&1
+            if ($status -match "accepting connections") {
+              Write-Host "✓ PostgreSQL ready"
+              break
+            }
+            Start-Sleep -Seconds 2
+          }
+
+      - name: Run pgloader (include drop for idempotency)
+        if: steps.check_status.outputs.already_migrated == 'false'
+        shell: pwsh
+        run: |
+          docker run --rm --network=mattermost_network `
+            mattermost/mattermost-pgloader:latest `
+            pgloader `
+              --with "include drop" `
+              --with "create tables" `
+              mysql://root:${{ secrets.DB_MYSQL_ROOT_PASSWORD }}@mattermost-mysql:3306/mattermost `
+              postgresql://mmuser:${{ secrets.DB_POSTGRES_PASSWORD }}@mattermost-postgres:5432/mattermost
+
+      - name: Mark Migration as Completed
+        if: steps.check_status.outputs.already_migrated == 'false'
+        shell: pwsh
+        run: New-Item -Path "C:\mattermost_migration_completed" -ItemType File -Force
+
+      - name: Deploy Upgraded Stack
+        env:
+          PG_PASSWORD: ${{ secrets.DB_POSTGRES_PASSWORD }}
+        shell: pwsh
+        run: |
+          docker rm -f mattermost-mysql -ErrorAction SilentlyContinue
+          docker compose -f $env:COMPOSE_FILE up -d --remove-orphans
+          Write-Host "Waiting for Mattermost..."
+          for ($i = 1; $i -le 60; $i++) {
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:8065/api/v4/system/ping" -UseBasicParsing -TimeoutSec 5
+              if ($response.StatusCode -eq 200) {
+                Write-Host "✓ Mattermost is up"
+                break
+              }
+            } catch {
+              Start-Sleep -Seconds 3
+            }
+          }
+
+      - name: Run Health Checks
+        shell: pwsh
+        run: |
+          try {
+            $response = Invoke-WebRequest -Uri "http://localhost:8065/api/v4/system/ping" -UseBasicParsing
+            if ($response.StatusCode -eq 200) {
+              Write-Host "✓ Mattermost upgraded and running on Postgres!"
+            }
+          } catch {
+            Write-Host "❌ Health check failed. Logs:"
+            docker compose -f $env:COMPOSE_FILE logs
+            exit 1
+          }
